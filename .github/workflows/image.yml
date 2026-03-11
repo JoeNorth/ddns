@@ -1,7 +1,6 @@
 name: Build cloudflare-ddns Docker image (multi-arch)
 
 on:
-  dispatch_workflow:
   push:
     branches: master
     tags:
