@@ -2,10 +2,8 @@ name: Build cloudflare-ddns Docker image (multi-arch)
 
 on:
   push:
-    branches: master
     tags:
       - "v*"
-  pull_request:
 
 env:
   REGISTRY: ghcr.io
