@@ -92,6 +92,9 @@ pub struct AppConfig {
     pub dry_run: bool,
     pub emoji: bool,
     pub quiet: bool,
+    // Docker label discovery
+    pub docker_label_enabled: bool,
+    pub docker_socket: Option<String>,
     // Legacy mode fields
     pub legacy_mode: bool,
     pub legacy_config: Option<LegacyConfig>,
@@ -442,6 +445,8 @@ fn legacy_to_app_config(legacy: LegacyConfig, dry_run: bool, repeat: bool) -> Ap
         dry_run,
         emoji: false,
         quiet: false,
+        docker_label_enabled: false,
+        docker_socket: None,
         legacy_mode: true,
         legacy_config: Some(legacy),
         repeat,
@@ -510,10 +515,13 @@ pub fn load_env_config(ppfmt: &PP) -> Result<AppConfig, String> {
     let emoji = getenv_bool("EMOJI", true);
     let quiet = getenv_bool("QUIET", false);
 
+    let docker_label_enabled = getenv_bool("DOCKER_LABEL_ENABLED", false);
+    let docker_socket = getenv("DOCKER_SOCKET");
+
     // Validate: must have at least one update target
-    if domains.is_empty() && waf_lists.is_empty() {
+    if domains.is_empty() && waf_lists.is_empty() && !docker_label_enabled {
         return Err(
-            "No update targets configured. Set DOMAINS, IP4_DOMAINS, IP6_DOMAINS, or WAF_LISTS."
+            "No update targets configured. Set DOMAINS, IP4_DOMAINS, IP6_DOMAINS, WAF_LISTS, or DOCKER_LABEL_ENABLED=true."
                 .to_string(),
         );
     }
@@ -562,6 +570,8 @@ pub fn load_env_config(ppfmt: &PP) -> Result<AppConfig, String> {
         dry_run: false, // Set later from CLI args
         emoji,
         quiet,
+        docker_label_enabled,
+        docker_socket,
         legacy_mode: false,
         legacy_config: None,
         repeat: false, // Set later
@@ -657,6 +667,16 @@ pub fn print_config_summary(config: &AppConfig, ppfmt: &PP) {
 
     if config.delete_on_stop {
         inner.infof("", "Delete on stop: enabled");
+    }
+
+    if config.docker_label_enabled {
+        match &config.docker_socket {
+            Some(path) => inner.noticef(
+                pp::EMOJI_DOCKER,
+                &format!("Docker label discovery: enabled (socket: {path})"),
+            ),
+            None => inner.noticef(pp::EMOJI_DOCKER, "Docker label discovery: enabled"),
+        }
     }
 
     if let Some(ref comment) = config.record_comment {
@@ -1193,6 +1213,8 @@ mod tests {
             dry_run: false,
             emoji: false,
             quiet: false,
+            docker_label_enabled: false,
+            docker_socket: None,
             legacy_mode: true,
             legacy_config: None,
             repeat: false,
@@ -1226,6 +1248,8 @@ mod tests {
             dry_run: false,
             emoji: false,
             quiet: false,
+            docker_label_enabled: false,
+            docker_socket: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: false,
@@ -1884,6 +1908,8 @@ mod tests {
             dry_run: false,
             emoji: false,
             quiet: false,
+            docker_label_enabled: false,
+            docker_socket: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: false,
@@ -1919,6 +1945,8 @@ mod tests {
             dry_run: false,
             emoji: false,
             quiet: true,
+            docker_label_enabled: false,
+            docker_socket: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: true,
@@ -1951,6 +1979,8 @@ mod tests {
             dry_run: false,
             emoji: false,
             quiet: false,
+            docker_label_enabled: false,
+            docker_socket: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: false,

@@ -1,5 +1,6 @@
 mod cloudflare;
 mod config;
+mod docker;
 mod domain;
 mod notifier;
 mod pp;

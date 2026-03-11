@@ -64,8 +64,18 @@ pub async fn update_once(
             }
         }
 
+        // Merge Docker-discovered domains if enabled
+        let effective_domains = if config.docker_label_enabled {
+            let docker_domains =
+                crate::docker::discover_docker_domains(config.docker_socket.as_deref(), ppfmt)
+                    .await;
+            merge_domains(&config.domains, &docker_domains)
+        } else {
+            config.domains.clone()
+        };
+
         // Update DNS records (env var mode - domain-based)
-        for (ip_type, domains) in &config.domains {
+        for (ip_type, domains) in &effective_domains {
             let ips = detected_ips.get(ip_type).cloned().unwrap_or_default();
             let record_type = ip_type.record_type();
 
@@ -234,8 +244,17 @@ pub async fn final_delete(
 ) {
     let mut messages = Vec::new();
 
+    // Merge Docker-discovered domains if enabled
+    let effective_domains = if config.docker_label_enabled {
+        let docker_domains =
+            crate::docker::discover_docker_domains(config.docker_socket.as_deref(), ppfmt).await;
+        merge_domains(&config.domains, &docker_domains)
+    } else {
+        config.domains.clone()
+    };
+
     // Delete DNS records
-    for (ip_type, domains) in &config.domains {
+    for (ip_type, domains) in &effective_domains {
         let record_type = ip_type.record_type();
 
         for domain_str in domains {
@@ -259,6 +278,23 @@ pub async fn final_delete(
     let msg = Message::merge(messages);
     heartbeat.exit(&msg).await;
     notifier.send(&msg).await;
+}
+
+/// Merge two domain maps, deduplicating entries per IP type.
+fn merge_domains(
+    base: &HashMap<IpType, Vec<String>>,
+    extra: &HashMap<IpType, Vec<String>>,
+) -> HashMap<IpType, Vec<String>> {
+    let mut merged = base.clone();
+    for (ip_type, domains) in extra {
+        let entry = merged.entry(*ip_type).or_default();
+        for domain in domains {
+            if !entry.contains(domain) {
+                entry.push(domain.clone());
+            }
+        }
+    }
+    merged
 }
 
 // ============================================================
@@ -687,6 +723,8 @@ mod tests {
             dry_run,
             emoji: false,
             quiet: true,
+            docker_label_enabled: false,
+            docker_socket: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: false,
@@ -2356,6 +2394,62 @@ mod tests {
         assert!(!w.shown_ipv4_secondary);
         assert!(!w.shown_ipv6);
         assert!(!w.shown_ipv6_secondary);
+    }
+
+    // -------------------------------------------------------
+    // merge_domains tests
+    // -------------------------------------------------------
+
+    #[test]
+    fn test_merge_domains_both_empty() {
+        let base: HashMap<IpType, Vec<String>> = HashMap::new();
+        let extra: HashMap<IpType, Vec<String>> = HashMap::new();
+        let result = super::merge_domains(&base, &extra);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_merge_domains_base_only() {
+        let mut base = HashMap::new();
+        base.insert(IpType::V4, vec!["a.com".to_string()]);
+        let extra: HashMap<IpType, Vec<String>> = HashMap::new();
+        let result = super::merge_domains(&base, &extra);
+        assert_eq!(result.get(&IpType::V4).unwrap(), &vec!["a.com".to_string()]);
+    }
+
+    #[test]
+    fn test_merge_domains_extra_only() {
+        let base: HashMap<IpType, Vec<String>> = HashMap::new();
+        let mut extra = HashMap::new();
+        extra.insert(IpType::V6, vec!["b.com".to_string()]);
+        let result = super::merge_domains(&base, &extra);
+        assert_eq!(result.get(&IpType::V6).unwrap(), &vec!["b.com".to_string()]);
+    }
+
+    #[test]
+    fn test_merge_domains_deduplication() {
+        let mut base = HashMap::new();
+        base.insert(IpType::V4, vec!["a.com".to_string(), "b.com".to_string()]);
+        let mut extra = HashMap::new();
+        extra.insert(IpType::V4, vec!["b.com".to_string(), "c.com".to_string()]);
+        let result = super::merge_domains(&base, &extra);
+        let v4 = result.get(&IpType::V4).unwrap();
+        assert_eq!(v4, &vec!["a.com".to_string(), "b.com".to_string(), "c.com".to_string()]);
+    }
+
+    #[test]
+    fn test_merge_domains_mixed_ip_types() {
+        let mut base = HashMap::new();
+        base.insert(IpType::V4, vec!["a.com".to_string()]);
+        let mut extra = HashMap::new();
+        extra.insert(IpType::V4, vec!["b.com".to_string()]);
+        extra.insert(IpType::V6, vec!["c.com".to_string()]);
+        let result = super::merge_domains(&base, &extra);
+        assert_eq!(
+            result.get(&IpType::V4).unwrap(),
+            &vec!["a.com".to_string(), "b.com".to_string()]
+        );
+        assert_eq!(result.get(&IpType::V6).unwrap(), &vec!["c.com".to_string()]);
     }
 }
 
