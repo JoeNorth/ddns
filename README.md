@@ -165,6 +165,88 @@ Notifications are sent when DNS records are updated, created, deleted, or when e
 
 Heartbeats are sent after each update cycle. On failure, a fail signal is sent. On shutdown, an exit signal is sent.
 
+## 🐳 Docker Label Discovery
+
+Automatically discover domains from running Docker containers. Containers are identified by the `cloudflare-ddns.domain` label, which can contain a comma-separated list of domains.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOCKER_LABEL_ENABLED` | `false` | Enable Docker label discovery |
+| `DOCKER_SOCKET` | (auto) | Custom Docker socket path (e.g. `/var/run/docker.sock`) |
+
+Add the label to your containers:
+
+```yml
+services:
+  my-app:
+    image: my-app:latest
+    labels:
+      cloudflare-ddns.domain: "app.example.com,api.example.com"
+```
+
+Discovered domains are merged with any statically configured `DOMAINS` each update cycle. The Docker socket must be accessible to the cloudflare-ddns container:
+
+```yml
+services:
+  cloudflare-ddns:
+    image: timothyjmiller/cloudflare-ddns:latest
+    environment:
+      - CLOUDFLARE_API_TOKEN=your-api-token
+      - DOCKER_LABEL_ENABLED=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+## 🖥️ Proxmox VM Discovery
+
+Automatically discover domains from Proxmox VE virtual machines. VMs are identified by a configurable tag, and the VM name is used as the domain name. IP addresses are read from the QEMU guest agent via the NIC attached to `vmbr0`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROXMOX_ENABLED` | `false` | Enable Proxmox VM discovery |
+| `PROXMOX_API_URL` | — | Proxmox API URL (e.g. `https://pve.example.com:8006`) |
+| `PROXMOX_API_TOKEN` | — | API token (e.g. `user@pam!token=secret-uuid`) |
+| `PROXMOX_TAG` | `dns` | Only discover VMs with this tag |
+
+### API Token Permissions
+
+Create a dedicated role with the minimum read-only privileges:
+
+**Proxmox VE 8.x:**
+
+| Path | Privilege |
+|------|-----------|
+| `/` | `Sys.Audit` |
+| `/vms` | `VM.Audit`, `VM.Monitor` |
+
+**Proxmox VE 9.x+:**
+
+| Path | Privilege |
+|------|-----------|
+| `/` | `Sys.Audit` |
+| `/vms` | `VM.Audit`, `VM.GuestAgent` |
+
+> On PVE 9.x+, prefer `VM.GuestAgent` over `VM.Monitor` — it is more narrowly scoped and does not grant full QEMU monitor access.
+
+Example setup:
+
+```bash
+# Create a read-only role (PVE 8.x)
+pveum role add CloudflareDDNS -privs "Sys.Audit,VM.Audit,VM.Monitor"
+
+# Create a user and API token
+pveum user add cloudflare-ddns@pve
+pveum aclmod / -user cloudflare-ddns@pve -role CloudflareDDNS
+pveum user token add cloudflare-ddns@pve ddns -privsep 0
+```
+
+### Requirements
+
+- The **QEMU guest agent** must be installed and running inside each VM
+- VMs must have a NIC attached to **vmbr0** (the bridge used to find the IP)
+- The VM **name** is used as the domain name (e.g., name a VM `web.example.com`)
+- VMs must be **tagged** with the configured tag (default: `dns`)
+
 ## ⏳ Timeouts
 
 | Variable | Default | Description |
@@ -215,6 +297,12 @@ Heartbeats are sent after each update cycle. On failure, a fail signal is sent. 
 | `HEALTHCHECKS` | — | 💓 Healthchecks.io URL |
 | `UPTIMEKUMA` | — | 💓 Uptime Kuma URL |
 | `SHOUTRRR` | — | 🔔 Notification URLs (newline-separated) |
+| `DOCKER_LABEL_ENABLED` | `false` | 🐳 Enable Docker label discovery |
+| `DOCKER_SOCKET` | (auto) | 🐳 Custom Docker socket path |
+| `PROXMOX_ENABLED` | `false` | 🖥️ Enable Proxmox VM discovery |
+| `PROXMOX_API_URL` | — | 🖥️ Proxmox API URL |
+| `PROXMOX_API_TOKEN` | — | 🖥️ Proxmox API token |
+| `PROXMOX_TAG` | `dns` | 🖥️ VM tag to filter by |
 
 ---
 

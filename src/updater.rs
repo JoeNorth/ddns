@@ -135,6 +135,66 @@ pub async fn update_once(
             }
         }
 
+        // Update Proxmox-discovered domains (each VM has its own IP)
+        if let Some(ref pve_config) = config.proxmox_config {
+            let pve_entries =
+                crate::proxmox::discover_proxmox_domains(pve_config, ppfmt).await;
+            for entry in &pve_entries {
+                let zone_id = match handle.zone_id_of_domain(&entry.domain, ppfmt).await {
+                    Some(id) => id,
+                    None => {
+                        ppfmt.errorf(
+                            pp::EMOJI_ERROR,
+                            &format!("Could not find zone for Proxmox domain {}", entry.domain),
+                        );
+                        all_ok = false;
+                        messages.push(Message::new_fail(&format!(
+                            "Failed to find zone for {}",
+                            entry.domain
+                        )));
+                        continue;
+                    }
+                };
+
+                let proxied = config
+                    .proxied_expression
+                    .as_ref()
+                    .map(|f| f(&entry.domain))
+                    .unwrap_or(false);
+
+                let result = handle
+                    .set_ips(
+                        &zone_id,
+                        &entry.domain,
+                        "A",
+                        &[entry.ip],
+                        proxied,
+                        config.ttl,
+                        config.record_comment.as_deref(),
+                        config.dry_run,
+                        ppfmt,
+                    )
+                    .await;
+
+                match result {
+                    SetResult::Updated => {
+                        messages.push(Message::new_ok(&format!(
+                            "Updated {} -> {}",
+                            entry.domain, entry.ip
+                        )));
+                    }
+                    SetResult::Failed => {
+                        all_ok = false;
+                        messages.push(Message::new_fail(&format!(
+                            "Failed to update {}",
+                            entry.domain
+                        )));
+                    }
+                    SetResult::Noop => {}
+                }
+            }
+        }
+
         // Update WAF lists
         for waf_list in &config.waf_lists {
             // Collect all detected IPs for WAF lists
@@ -261,6 +321,21 @@ pub async fn final_delete(
             if let Some(zone_id) = handle.zone_id_of_domain(domain_str, ppfmt).await {
                 handle.final_delete(&zone_id, domain_str, record_type, ppfmt).await;
                 messages.push(Message::new_ok(&format!("Deleted records for {domain_str}")));
+            }
+        }
+    }
+
+    // Delete Proxmox-discovered domain records
+    if let Some(ref pve_config) = config.proxmox_config {
+        let pve_entries =
+            crate::proxmox::discover_proxmox_domains(pve_config, ppfmt).await;
+        for entry in &pve_entries {
+            if let Some(zone_id) = handle.zone_id_of_domain(&entry.domain, ppfmt).await {
+                handle.final_delete(&zone_id, &entry.domain, "A", ppfmt).await;
+                messages.push(Message::new_ok(&format!(
+                    "Deleted records for {}",
+                    entry.domain
+                )));
             }
         }
     }
@@ -725,6 +800,7 @@ mod tests {
             quiet: true,
             docker_label_enabled: false,
             docker_socket: None,
+            proxmox_config: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: false,

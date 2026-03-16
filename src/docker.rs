@@ -71,9 +71,9 @@ pub async fn discover_docker_domains(
 fn connect(socket_path: Option<&str>) -> Result<Docker, bollard::errors::Error> {
     match socket_path {
         Some(path) => {
-            Docker::connect_with_unix(path, DOCKER_TIMEOUT, &bollard::API_DEFAULT_VERSION)
+            Docker::connect_with_socket(path, DOCKER_TIMEOUT, &bollard::API_DEFAULT_VERSION)
         }
-        None => Docker::connect_with_local_defaults(),
+        None => Docker::connect_with_socket_defaults(),
     }
 }
 

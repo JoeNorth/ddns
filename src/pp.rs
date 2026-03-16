@@ -29,6 +29,7 @@ pub const EMOJI_NOTIFY: &str = "\u{1F514}";
 pub const EMOJI_HEARTBEAT: &str = "\u{1F493}";
 pub const EMOJI_CONFIG: &str = "\u{2699}\u{FE0F}";
 pub const EMOJI_DOCKER: &str = "\u{1F433}";
+pub const EMOJI_PROXMOX: &str = "\u{1F5A5}\u{FE0F}";
 #[allow(dead_code)]
 pub const EMOJI_HINT: &str = "\u{1F4A1}";
 

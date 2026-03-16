@@ -95,6 +95,8 @@ pub struct AppConfig {
     // Docker label discovery
     pub docker_label_enabled: bool,
     pub docker_socket: Option<String>,
+    // Proxmox VM discovery
+    pub proxmox_config: Option<crate::proxmox::ProxmoxConfig>,
     // Legacy mode fields
     pub legacy_mode: bool,
     pub legacy_config: Option<LegacyConfig>,
@@ -447,6 +449,7 @@ fn legacy_to_app_config(legacy: LegacyConfig, dry_run: bool, repeat: bool) -> Ap
         quiet: false,
         docker_label_enabled: false,
         docker_socket: None,
+        proxmox_config: None,
         legacy_mode: true,
         legacy_config: Some(legacy),
         repeat,
@@ -518,10 +521,33 @@ pub fn load_env_config(ppfmt: &PP) -> Result<AppConfig, String> {
     let docker_label_enabled = getenv_bool("DOCKER_LABEL_ENABLED", false);
     let docker_socket = getenv("DOCKER_SOCKET");
 
+    let proxmox_enabled = getenv_bool("PROXMOX_ENABLED", false);
+    let proxmox_config = if proxmox_enabled {
+        let api_url = match getenv("PROXMOX_API_URL") {
+            Some(u) => u,
+            None => return Err("PROXMOX_ENABLED=true but PROXMOX_API_URL is not set".to_string()),
+        };
+        let api_token_raw = match getenv("PROXMOX_API_TOKEN") {
+            Some(t) => t,
+            None => {
+                return Err("PROXMOX_ENABLED=true but PROXMOX_API_TOKEN is not set".to_string())
+            }
+        };
+        let tag = getenv("PROXMOX_TAG").unwrap_or_else(|| "dns".to_string());
+
+        Some(crate::proxmox::ProxmoxConfig {
+            api_url,
+            api_token: crate::proxmox::format_api_token(&api_token_raw),
+            tag,
+        })
+    } else {
+        None
+    };
+
     // Validate: must have at least one update target
-    if domains.is_empty() && waf_lists.is_empty() && !docker_label_enabled {
+    if domains.is_empty() && waf_lists.is_empty() && !docker_label_enabled && !proxmox_enabled {
         return Err(
-            "No update targets configured. Set DOMAINS, IP4_DOMAINS, IP6_DOMAINS, WAF_LISTS, or DOCKER_LABEL_ENABLED=true."
+            "No update targets configured. Set DOMAINS, IP4_DOMAINS, IP6_DOMAINS, WAF_LISTS, DOCKER_LABEL_ENABLED=true, or PROXMOX_ENABLED=true."
                 .to_string(),
         );
     }
@@ -572,6 +598,7 @@ pub fn load_env_config(ppfmt: &PP) -> Result<AppConfig, String> {
         quiet,
         docker_label_enabled,
         docker_socket,
+        proxmox_config,
         legacy_mode: false,
         legacy_config: None,
         repeat: false, // Set later
@@ -677,6 +704,16 @@ pub fn print_config_summary(config: &AppConfig, ppfmt: &PP) {
             ),
             None => inner.noticef(pp::EMOJI_DOCKER, "Docker label discovery: enabled"),
         }
+    }
+
+    if let Some(ref pve) = config.proxmox_config {
+        inner.noticef(
+            pp::EMOJI_PROXMOX,
+            &format!(
+                "Proxmox VM discovery: enabled (tag: {})",
+                pve.tag
+            ),
+        );
     }
 
     if let Some(ref comment) = config.record_comment {
@@ -1215,6 +1252,7 @@ mod tests {
             quiet: false,
             docker_label_enabled: false,
             docker_socket: None,
+            proxmox_config: None,
             legacy_mode: true,
             legacy_config: None,
             repeat: false,
@@ -1250,6 +1288,7 @@ mod tests {
             quiet: false,
             docker_label_enabled: false,
             docker_socket: None,
+            proxmox_config: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: false,
@@ -1910,6 +1949,7 @@ mod tests {
             quiet: false,
             docker_label_enabled: false,
             docker_socket: None,
+            proxmox_config: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: false,
@@ -1947,6 +1987,7 @@ mod tests {
             quiet: true,
             docker_label_enabled: false,
             docker_socket: None,
+            proxmox_config: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: true,
@@ -1981,6 +2022,7 @@ mod tests {
             quiet: false,
             docker_label_enabled: false,
             docker_socket: None,
+            proxmox_config: None,
             legacy_mode: false,
             legacy_config: None,
             repeat: false,

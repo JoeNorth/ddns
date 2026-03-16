@@ -5,6 +5,7 @@ mod domain;
 mod notifier;
 mod pp;
 mod provider;
+mod proxmox;
 mod updater;
 
 use crate::cloudflare::{Auth, CloudflareHandle};
