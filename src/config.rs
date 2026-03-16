@@ -533,16 +533,11 @@ pub fn load_env_config(ppfmt: &PP) -> Result<AppConfig, String> {
                 return Err("PROXMOX_ENABLED=true but PROXMOX_API_TOKEN is not set".to_string())
             }
         };
-        let node = match getenv("PROXMOX_NODE") {
-            Some(n) => n,
-            None => return Err("PROXMOX_ENABLED=true but PROXMOX_NODE is not set".to_string()),
-        };
         let tag = getenv("PROXMOX_TAG").unwrap_or_else(|| "dns".to_string());
 
         Some(crate::proxmox::ProxmoxConfig {
             api_url,
             api_token: crate::proxmox::format_api_token(&api_token_raw),
-            node,
             tag,
         })
     } else {
@@ -715,8 +710,8 @@ pub fn print_config_summary(config: &AppConfig, ppfmt: &PP) {
         inner.noticef(
             pp::EMOJI_PROXMOX,
             &format!(
-                "Proxmox VM discovery: enabled (node: {}, tag: {})",
-                pve.node, pve.tag
+                "Proxmox VM discovery: enabled (tag: {})",
+                pve.tag
             ),
         );
     }

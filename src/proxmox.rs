@@ -22,11 +22,18 @@ pub struct ProxmoxEntry {
 pub struct ProxmoxConfig {
     pub api_url: String,
     pub api_token: String,
-    pub node: String,
     pub tag: String,
 }
 
 /// Discover domains and IPs from Proxmox VMs tagged with the configured tag.
+///
+/// Uses the cluster-wide `/cluster/resources?type=vm` endpoint to discover VMs across all nodes
+/// in a Proxmox VE cluster. Each VM result includes the `node` it resides on, which is then
+/// used for the per-VM config and guest agent queries.
+///
+/// NOTE: This endpoint is assumed to work on standalone (non-clustered) single-node Proxmox
+/// installations as well, since PVE always has cluster infrastructure internally. This has not
+/// been confirmed against a non-clustered node and should be verified.
 ///
 /// For each running VM with the tag:
 /// 1. Uses the VM name as the domain
@@ -85,7 +92,7 @@ pub async fn discover_proxmox_domains(
         }
 
         // Find the MAC of the NIC attached to vmbr0
-        let mac = match get_vmbr0_mac(&client, config, vm.vmid, ppfmt).await {
+        let mac = match get_vmbr0_mac(&client, config, &vm.node, vm.vmid, ppfmt).await {
             Some(m) => m,
             None => {
                 ppfmt.warningf(
@@ -100,7 +107,7 @@ pub async fn discover_proxmox_domains(
         };
 
         // Get the IP from the guest agent by matching MAC
-        let ip = match get_ip_by_mac(&client, config, vm.vmid, &mac, ppfmt).await {
+        let ip = match get_ip_by_mac(&client, config, &vm.node, vm.vmid, &mac, ppfmt).await {
             Some(ip) => ip,
             None => {
                 ppfmt.warningf(
@@ -153,6 +160,8 @@ struct VmEntry {
     #[serde(default)]
     name: String,
     #[serde(default)]
+    node: String,
+    #[serde(default)]
     status: String,
     #[serde(default)]
     tags: Option<String>,
@@ -185,15 +194,18 @@ struct GuestAgentResult {
 // API calls
 // ============================================================
 
+/// List all QEMU VMs across the cluster using the `/cluster/resources` endpoint.
+///
+/// NOTE: This endpoint is assumed to work on standalone (non-clustered) nodes. If it does not,
+/// this will need to fall back to `/nodes/{node}/qemu` with a user-provided node name.
 async fn list_vms(
     client: &Client,
     config: &ProxmoxConfig,
     ppfmt: &PP,
 ) -> Option<Vec<VmEntry>> {
     let url = format!(
-        "{}/api2/json/nodes/{}/qemu",
+        "{}/api2/json/cluster/resources?type=vm",
         config.api_url.trim_end_matches('/'),
-        config.node
     );
 
     let resp = client
@@ -241,13 +253,14 @@ async fn list_vms(
 async fn get_vmbr0_mac(
     client: &Client,
     config: &ProxmoxConfig,
+    node: &str,
     vmid: u64,
     ppfmt: &PP,
 ) -> Option<String> {
     let url = format!(
         "{}/api2/json/nodes/{}/qemu/{}/config",
         config.api_url.trim_end_matches('/'),
-        config.node,
+        node,
         vmid
     );
 
@@ -341,6 +354,7 @@ fn looks_like_mac(s: &str) -> bool {
 async fn get_ip_by_mac(
     client: &Client,
     config: &ProxmoxConfig,
+    node: &str,
     vmid: u64,
     mac: &str,
     ppfmt: &PP,
@@ -348,7 +362,7 @@ async fn get_ip_by_mac(
     let url = format!(
         "{}/api2/json/nodes/{}/qemu/{}/agent/network-get-interfaces",
         config.api_url.trim_end_matches('/'),
-        config.node,
+        node,
         vmid
     );
 
@@ -481,6 +495,7 @@ mod tests {
         let vm = VmEntry {
             vmid: 100,
             name: "test".to_string(),
+            node: "pve1".to_string(),
             status: "running".to_string(),
             tags: Some("dns".to_string()),
         };
@@ -493,6 +508,7 @@ mod tests {
         let vm = VmEntry {
             vmid: 100,
             name: "test".to_string(),
+            node: "pve1".to_string(),
             status: "running".to_string(),
             tags: Some("dns;web;prod".to_string()),
         };
@@ -507,6 +523,7 @@ mod tests {
         let vm = VmEntry {
             vmid: 100,
             name: "test".to_string(),
+            node: "pve1".to_string(),
             status: "running".to_string(),
             tags: None,
         };
@@ -540,7 +557,6 @@ mod tests {
         ProxmoxConfig {
             api_url: base_url.to_string(),
             api_token: "PVEAPIToken=test@pam!tok=secret".to_string(),
-            node: "pve1".to_string(),
             tag: "dns".to_string(),
         }
     }
@@ -549,7 +565,7 @@ mod tests {
         PP::new(false, true)
     }
 
-    /// JSON for a VM list response with the given VMs.
+    /// JSON for a cluster/resources response with the given VMs.
     fn vm_list_response(vms: Vec<serde_json::Value>) -> serde_json::Value {
         serde_json::json!({ "data": vms })
     }
@@ -574,13 +590,14 @@ mod tests {
         let server = MockServer::start().await;
         let config = test_config(&server.uri());
 
-        // List VMs
+        // List VMs via cluster resources
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![
                 serde_json::json!({
                     "vmid": 100,
                     "name": "web.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns"
                 }),
@@ -629,29 +646,33 @@ mod tests {
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![
                 serde_json::json!({
                     "vmid": 100,
                     "name": "included.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns;prod"
                 }),
                 serde_json::json!({
                     "vmid": 101,
                     "name": "stopped-vm.example.com",
+                    "node": "pve1",
                     "status": "stopped",
                     "tags": "dns"
                 }),
                 serde_json::json!({
                     "vmid": 102,
                     "name": "no-tag.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "web"
                 }),
                 serde_json::json!({
                     "vmid": 103,
                     "name": "no-tags-field.example.com",
+                    "node": "pve1",
                     "status": "running"
                 }),
             ])))
@@ -695,11 +716,12 @@ mod tests {
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![
                 serde_json::json!({
                     "vmid": 100,
                     "name": "novmbr0.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns"
                 }),
@@ -729,11 +751,12 @@ mod tests {
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![
                 serde_json::json!({
                     "vmid": 100,
                     "name": "noagent.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns"
                 }),
@@ -769,7 +792,6 @@ mod tests {
         let config = ProxmoxConfig {
             api_url: "http://127.0.0.1:1".to_string(),
             api_token: "PVEAPIToken=test@pam!tok=secret".to_string(),
-            node: "pve1".to_string(),
             tag: "dns".to_string(),
         };
 
@@ -784,7 +806,7 @@ mod tests {
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![])))
             .mount(&server)
             .await;
@@ -800,7 +822,7 @@ mod tests {
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(401).set_body_string("authentication failure"))
             .mount(&server)
             .await;
@@ -809,24 +831,26 @@ mod tests {
         assert!(entries.is_empty());
     }
 
-    /// Multiple VMs discovered: all with valid IPs are returned.
+    /// Multiple VMs discovered across different nodes: all with valid IPs are returned.
     #[tokio::test]
     async fn test_discover_multiple_vms() {
         let server = MockServer::start().await;
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![
                 serde_json::json!({
                     "vmid": 100,
                     "name": "web.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns"
                 }),
                 serde_json::json!({
                     "vmid": 101,
                     "name": "api.example.com",
+                    "node": "pve2",
                     "status": "running",
                     "tags": "dns;prod"
                 }),
@@ -834,7 +858,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // VM 100 config + agent
+        // VM 100 on pve1: config + agent
         Mock::given(method("GET"))
             .and(path("/api2/json/nodes/pve1/qemu/100/config"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_config_response(
@@ -855,9 +879,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        // VM 101 config + agent
+        // VM 101 on pve2: config + agent
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu/101/config"))
+            .and(path("/api2/json/nodes/pve2/qemu/101/config"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_config_response(
                 serde_json::json!({ "net0": "virtio=AA:BB:CC:DD:EE:02,bridge=vmbr0" }),
             )))
@@ -865,7 +889,7 @@ mod tests {
             .await;
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu/101/agent/network-get-interfaces"))
+            .and(path("/api2/json/nodes/pve2/qemu/101/agent/network-get-interfaces"))
             .respond_with(ResponseTemplate::new(200).set_body_json(guest_agent_response(vec![
                 serde_json::json!({
                     "name": "eth0",
@@ -891,11 +915,12 @@ mod tests {
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![
                 serde_json::json!({
                     "vmid": 100,
                     "name": "  Web.Example.COM  ",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns"
                 }),
@@ -935,17 +960,19 @@ mod tests {
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![
                 serde_json::json!({
                     "vmid": 100,
                     "name": "good.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns"
                 }),
                 serde_json::json!({
                     "vmid": 101,
                     "name": "bad.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns"
                 }),
@@ -1002,11 +1029,12 @@ mod tests {
         let config = test_config(&server.uri());
 
         Mock::given(method("GET"))
-            .and(path("/api2/json/nodes/pve1/qemu"))
+            .and(path("/api2/json/cluster/resources"))
             .respond_with(ResponseTemplate::new(200).set_body_json(vm_list_response(vec![
                 serde_json::json!({
                     "vmid": 100,
                     "name": "multi-nic.example.com",
+                    "node": "pve1",
                     "status": "running",
                     "tags": "dns"
                 }),
