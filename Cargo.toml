@@ -15,7 +15,6 @@ chrono = { version = "0.4", features = ["clock"] }
 url = "2"
 idna = "1"
 if-addrs = "0.15"
-ipnet = "2"
 bollard = { version = "0.20", default-features = false, features = ["pipe"] }
 technitium = { version = "0.3", default-features = false, features = ["rustls"] }
 
