@@ -353,6 +353,8 @@ mod tests {
             aaaa: false,
             purge_unknown_records: false,
             ttl: 300,
+            ip4_provider: None,
+            ip6_provider: None,
         }
     }
 
@@ -866,6 +868,8 @@ mod tests {
             aaaa: false,
             purge_unknown_records: true,
             ttl: 300,
+            ip4_provider: None,
+            ip6_provider: None,
         };
         ddns.commit_record("198.51.100.7", "A", &config.cloudflare, 300, true)
             .await;
@@ -965,6 +969,8 @@ mod tests {
             aaaa: false,
             purge_unknown_records: false,
             ttl: 300,
+            ip4_provider: None,
+            ip6_provider: None,
         };
 
         ddns.commit_record("203.0.113.99", "A", &config.cloudflare, 300, false)
