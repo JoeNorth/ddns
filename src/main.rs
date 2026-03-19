@@ -104,6 +104,8 @@ async fn main() {
     // Start heartbeat
     heartbeat.start().await;
 
+    let mut cf_cache = cf_ip_filter::CachedCloudflareFilter::new();
+
     // Dispatch based on backend type
     match app_config.backend {
         BackendType::Cloudflare => {
@@ -116,9 +118,9 @@ async fn main() {
             );
 
             if app_config.legacy_mode {
-                run_legacy_mode(&app_config, &handle, &notifier, &heartbeat, &ppfmt, running).await;
+                run_legacy_mode(&app_config, &handle, &notifier, &heartbeat, &ppfmt, running, &mut cf_cache).await;
             } else {
-                run_env_mode(&app_config, &handle, Some(&handle), &notifier, &heartbeat, &ppfmt, running).await;
+                run_env_mode(&app_config, &handle, Some(&handle), &notifier, &heartbeat, &ppfmt, running, &mut cf_cache).await;
             }
 
             if app_config.delete_on_stop && !app_config.legacy_mode {
@@ -138,7 +140,7 @@ async fn main() {
                 app_config.update_timeout,
             );
 
-            run_env_mode(&app_config, &handle, None, &notifier, &heartbeat, &ppfmt, running).await;
+            run_env_mode(&app_config, &handle, None, &notifier, &heartbeat, &ppfmt, running, &mut cf_cache).await;
 
             if app_config.delete_on_stop {
                 ppfmt.noticef(pp::EMOJI_STOP, "Deleting records on stop...");
@@ -160,6 +162,7 @@ async fn run_legacy_mode<B: DnsBackend>(
     heartbeat: &Heartbeat,
     ppfmt: &PP,
     running: Arc<AtomicBool>,
+    cf_cache: &mut cf_ip_filter::CachedCloudflareFilter,
 ) {
     let legacy = match &config.legacy_config {
         Some(l) => l,
@@ -182,7 +185,7 @@ async fn run_legacy_mode<B: DnsBackend>(
         }
 
         while running.load(Ordering::SeqCst) {
-            updater::update_once(config, handle, notifier, heartbeat, ppfmt).await;
+            updater::update_once(config, handle, notifier, heartbeat, cf_cache, ppfmt).await;
 
             for _ in 0..legacy.ttl {
                 if !running.load(Ordering::SeqCst) {
@@ -192,7 +195,7 @@ async fn run_legacy_mode<B: DnsBackend>(
             }
         }
     } else {
-        updater::update_once(config, handle, notifier, heartbeat, ppfmt).await;
+        updater::update_once(config, handle, notifier, heartbeat, cf_cache, ppfmt).await;
     }
 }
 
@@ -204,6 +207,7 @@ async fn run_env_mode<B: DnsBackend>(
     heartbeat: &Heartbeat,
     ppfmt: &PP,
     running: Arc<AtomicBool>,
+    cf_cache: &mut cf_ip_filter::CachedCloudflareFilter,
 ) {
     // Helper to run one update cycle + WAF if applicable
     async fn do_update<B2: DnsBackend>(
@@ -212,9 +216,10 @@ async fn run_env_mode<B: DnsBackend>(
         waf_handle: Option<&CloudflareHandle>,
         notifier: &CompositeNotifier,
         heartbeat: &Heartbeat,
+        cf_cache: &mut cf_ip_filter::CachedCloudflareFilter,
         ppfmt: &PP,
     ) {
-        updater::update_once(config, handle, notifier, heartbeat, ppfmt).await;
+        updater::update_once(config, handle, notifier, heartbeat, cf_cache, ppfmt).await;
 
         // WAF list updates (Cloudflare-only)
         if let Some(cf_handle) = waf_handle {
@@ -242,7 +247,7 @@ async fn run_env_mode<B: DnsBackend>(
     match &config.update_cron {
         CronSchedule::Once => {
             if config.update_on_start {
-                do_update(config, handle, waf_handle, notifier, heartbeat, ppfmt).await;
+                do_update(config, handle, waf_handle, notifier, heartbeat, cf_cache, ppfmt).await;
             }
         }
         schedule => {
@@ -258,7 +263,7 @@ async fn run_env_mode<B: DnsBackend>(
 
             // Update on start if configured
             if config.update_on_start {
-                do_update(config, handle, waf_handle, notifier, heartbeat, ppfmt).await;
+                do_update(config, handle, waf_handle, notifier, heartbeat, cf_cache, ppfmt).await;
             }
 
             // Main loop
@@ -285,7 +290,7 @@ async fn run_env_mode<B: DnsBackend>(
                     return;
                 }
 
-                do_update(config, handle, waf_handle, notifier, heartbeat, ppfmt).await;
+                do_update(config, handle, waf_handle, notifier, heartbeat, cf_cache, ppfmt).await;
             }
         }
     }
