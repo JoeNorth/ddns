@@ -872,12 +872,11 @@ mod tests {
 
     #[test]
     fn test_substitute_env_vars() {
-        std::env::set_var("CF_DDNS_TEST_VAR", "test_value");
+        let _g = EnvGuard::set("CF_DDNS_TEST_VAR", "test_value");
         let result = substitute_env_vars("token: ${CF_DDNS_TEST_VAR}");
         assert_eq!(result, "token: test_value");
         let result2 = substitute_env_vars("token: $CF_DDNS_TEST_VAR");
         assert_eq!(result2, "token: test_value");
-        std::env::remove_var("CF_DDNS_TEST_VAR");
     }
 
     // --- parse_duration_string edge cases ---
@@ -914,7 +913,8 @@ mod tests {
     #[test]
     fn test_read_cron_default() {
         // No env var set -> default 5m
-        std::env::remove_var("UPDATE_CRON");
+        let mut g = EnvGuard::set("_PLACEHOLDER_CRON_DEF", "x");
+        g.remove("UPDATE_CRON");
         let pp = PP::new(false, false);
         let sched = read_cron_from_env(&pp).unwrap();
         assert!(matches!(sched, CronSchedule::Every(d) if d == Duration::from_secs(300)));
@@ -922,114 +922,110 @@ mod tests {
 
     #[test]
     fn test_read_cron_once() {
-        std::env::set_var("UPDATE_CRON", "@once");
+        let _g = EnvGuard::set("UPDATE_CRON", "@once");
         let pp = PP::new(false, false);
         let sched = read_cron_from_env(&pp).unwrap();
         assert!(matches!(sched, CronSchedule::Once));
-        std::env::remove_var("UPDATE_CRON");
     }
 
     #[test]
     fn test_read_cron_every() {
-        std::env::set_var("UPDATE_CRON", "@every 10m");
+        let _g = EnvGuard::set("UPDATE_CRON", "@every 10m");
         let pp = PP::new(false, false);
         let sched = read_cron_from_env(&pp).unwrap();
         assert!(matches!(sched, CronSchedule::Every(d) if d == Duration::from_secs(600)));
-        std::env::remove_var("UPDATE_CRON");
     }
 
     #[test]
     fn test_read_cron_deprecated_disabled() {
-        std::env::set_var("UPDATE_CRON", "@disabled");
+        let _g = EnvGuard::set("UPDATE_CRON", "@disabled");
         let pp = PP::new(false, false);
         let sched = read_cron_from_env(&pp).unwrap();
         assert!(matches!(sched, CronSchedule::Once));
-        std::env::remove_var("UPDATE_CRON");
     }
 
     #[test]
     fn test_read_cron_unsupported_format() {
-        std::env::set_var("UPDATE_CRON", "*/5 * * * *");
+        let _g = EnvGuard::set("UPDATE_CRON", "*/5 * * * *");
         let pp = PP::new(false, false);
         let result = read_cron_from_env(&pp);
         assert!(result.is_err());
-        std::env::remove_var("UPDATE_CRON");
     }
 
     // --- getenv helpers ---
 
     #[test]
     fn test_getenv_empty_string_is_none() {
-        std::env::set_var("TEST_GETENV_EMPTY", "");
+        let _g = EnvGuard::set("TEST_GETENV_EMPTY", "");
         assert!(getenv("TEST_GETENV_EMPTY").is_none());
-        std::env::remove_var("TEST_GETENV_EMPTY");
     }
 
     #[test]
     fn test_getenv_whitespace_is_none() {
-        std::env::set_var("TEST_GETENV_WS", "   ");
+        let _g = EnvGuard::set("TEST_GETENV_WS", "   ");
         assert!(getenv("TEST_GETENV_WS").is_none());
-        std::env::remove_var("TEST_GETENV_WS");
     }
 
     #[test]
     fn test_getenv_trims() {
-        std::env::set_var("TEST_GETENV_TRIM", "  hello  ");
+        let _g = EnvGuard::set("TEST_GETENV_TRIM", "  hello  ");
         assert_eq!(getenv("TEST_GETENV_TRIM"), Some("hello".to_string()));
-        std::env::remove_var("TEST_GETENV_TRIM");
     }
 
     #[test]
     fn test_getenv_bool_true_values() {
+        let g = EnvGuard::set("TEST_BOOL", "true");
         for val in &["true", "1", "yes", "True", "YES"] {
             std::env::set_var("TEST_BOOL", val);
             assert!(getenv_bool("TEST_BOOL", false));
         }
-        std::env::remove_var("TEST_BOOL");
+        drop(g);
     }
 
     #[test]
     fn test_getenv_bool_false_values() {
+        let g = EnvGuard::set("TEST_BOOL", "false");
         for val in &["false", "0", "no", "anything"] {
             std::env::set_var("TEST_BOOL", val);
             assert!(!getenv_bool("TEST_BOOL", true));
         }
-        std::env::remove_var("TEST_BOOL");
+        drop(g);
     }
 
     #[test]
     fn test_getenv_bool_default() {
-        std::env::remove_var("TEST_BOOL_MISSING");
+        let mut g = EnvGuard::set("_PLACEHOLDER_BOOL", "x");
+        g.remove("TEST_BOOL_MISSING");
         assert!(getenv_bool("TEST_BOOL_MISSING", true));
         assert!(!getenv_bool("TEST_BOOL_MISSING", false));
     }
 
     #[test]
     fn test_getenv_duration_valid() {
-        std::env::set_var("TEST_DUR", "10s");
+        let _g = EnvGuard::set("TEST_DUR", "10s");
         let d = getenv_duration("TEST_DUR", Duration::from_secs(99));
         assert_eq!(d, Duration::from_secs(10));
-        std::env::remove_var("TEST_DUR");
     }
 
     #[test]
     fn test_getenv_duration_default() {
-        std::env::remove_var("TEST_DUR_MISSING");
+        let mut g = EnvGuard::set("_PLACEHOLDER_DUR", "x");
+        g.remove("TEST_DUR_MISSING");
         let d = getenv_duration("TEST_DUR_MISSING", Duration::from_secs(42));
         assert_eq!(d, Duration::from_secs(42));
     }
 
     #[test]
     fn test_getenv_list() {
-        std::env::set_var("TEST_LIST", "a,b,,c");
+        let _g = EnvGuard::set("TEST_LIST", "a,b,,c");
         let list = getenv_list("TEST_LIST", ',');
         assert_eq!(list, vec!["a", "b", "c"]);
-        std::env::remove_var("TEST_LIST");
     }
 
     #[test]
     fn test_getenv_list_empty() {
-        std::env::remove_var("TEST_LIST_MISSING");
+        let mut g = EnvGuard::set("_PLACEHOLDER_LIST", "x");
+        g.remove("TEST_LIST_MISSING");
         let list = getenv_list("TEST_LIST_MISSING", ',');
         assert!(list.is_empty());
     }
@@ -1038,63 +1034,59 @@ mod tests {
 
     #[test]
     fn test_read_regex_valid() {
-        std::env::set_var("TEST_REGEX", "cloudflare-ddns");
+        let _g = EnvGuard::set("TEST_REGEX", "cloudflare-ddns");
         let pp = PP::new(false, false);
         let regex = read_regex("TEST_REGEX", &pp);
         assert!(regex.is_some());
         assert!(regex.unwrap().is_match("managed by cloudflare-ddns"));
-        std::env::remove_var("TEST_REGEX");
     }
 
     #[test]
     fn test_read_regex_invalid() {
-        std::env::set_var("TEST_REGEX_BAD", "[invalid(");
+        let _g = EnvGuard::set("TEST_REGEX_BAD", "[invalid(");
         let pp = PP::new(false, false);
         let regex = read_regex("TEST_REGEX_BAD", &pp);
         assert!(regex.is_none());
-        std::env::remove_var("TEST_REGEX_BAD");
     }
 
     #[test]
     fn test_read_regex_empty() {
-        std::env::set_var("TEST_REGEX_E", "");
+        let _g = EnvGuard::set("TEST_REGEX_E", "");
         let pp = PP::new(false, false);
         let regex = read_regex("TEST_REGEX_E", &pp);
         assert!(regex.is_none());
-        std::env::remove_var("TEST_REGEX_E");
     }
 
     // --- read_domains_from_env ---
 
     #[test]
     fn test_read_domains_both() {
-        std::env::set_var("DOMAINS", "example.com,www.example.com");
-        std::env::remove_var("IP4_DOMAINS");
-        std::env::remove_var("IP6_DOMAINS");
+        let mut g = EnvGuard::set("DOMAINS", "example.com,www.example.com");
+        g.remove("IP4_DOMAINS");
+        g.remove("IP6_DOMAINS");
         let pp = PP::new(false, false);
         let domains = read_domains_from_env(&pp);
         assert_eq!(domains.get(&IpType::V4).unwrap().len(), 2);
         assert_eq!(domains.get(&IpType::V6).unwrap().len(), 2);
-        std::env::remove_var("DOMAINS");
     }
 
     #[test]
     fn test_read_domains_ip4_only() {
-        std::env::remove_var("DOMAINS");
-        std::env::set_var("IP4_DOMAINS", "v4.example.com");
-        std::env::remove_var("IP6_DOMAINS");
+        let mut g = EnvGuard::set("IP4_DOMAINS", "v4.example.com");
+        g.remove("DOMAINS");
+        g.remove("IP6_DOMAINS");
         let pp = PP::new(false, false);
         let domains = read_domains_from_env(&pp);
         assert_eq!(domains.get(&IpType::V4).unwrap(), &vec!["v4.example.com".to_string()]);
         assert!(domains.get(&IpType::V6).is_none());
-        std::env::remove_var("IP4_DOMAINS");
     }
 
     #[test]
     fn test_read_domains_empty() {
-        std::env::remove_var("DOMAINS");
-        std::env::remove_var("IP4_DOMAINS");
-        std::env::remove_var("IP6_DOMAINS");
+        let mut g = EnvGuard::set("_PLACEHOLDER_DOM", "x");
+        g.remove("DOMAINS");
+        g.remove("IP4_DOMAINS");
+        g.remove("IP6_DOMAINS");
         let pp = PP::new(false, false);
         let domains = read_domains_from_env(&pp);
         assert!(domains.is_empty());
@@ -1104,22 +1096,20 @@ mod tests {
 
     #[test]
     fn test_read_waf_lists_valid() {
-        std::env::set_var("WAF_LISTS", "acc123/my_list");
+        let _g = EnvGuard::set("WAF_LISTS", "acc123/my_list");
         let pp = PP::new(false, false);
         let lists = read_waf_lists_from_env(&pp);
         assert_eq!(lists.len(), 1);
         assert_eq!(lists[0].account_id, "acc123");
         assert_eq!(lists[0].list_name, "my_list");
-        std::env::remove_var("WAF_LISTS");
     }
 
     #[test]
     fn test_read_waf_lists_invalid_skipped() {
-        std::env::set_var("WAF_LISTS", "no-slash");
+        let _g = EnvGuard::set("WAF_LISTS", "no-slash");
         let pp = PP::new(false, false);
         let lists = read_waf_lists_from_env(&pp);
         assert!(lists.is_empty());
-        std::env::remove_var("WAF_LISTS");
     }
 
     // --- legacy_to_app_config ---
@@ -1312,20 +1302,18 @@ mod tests {
 
     #[test]
     fn test_is_env_config_mode_with_token() {
-        std::env::set_var("CLOUDFLARE_API_TOKEN", "test");
+        let _g = EnvGuard::set("CLOUDFLARE_API_TOKEN", "test");
         assert!(is_env_config_mode());
-        std::env::remove_var("CLOUDFLARE_API_TOKEN");
     }
 
     #[test]
     fn test_is_env_config_mode_with_domains() {
-        std::env::remove_var("CLOUDFLARE_API_TOKEN");
-        std::env::remove_var("CF_API_TOKEN");
-        std::env::remove_var("CLOUDFLARE_API_TOKEN_FILE");
-        std::env::remove_var("CF_API_TOKEN_FILE");
-        std::env::set_var("DOMAINS", "example.com");
+        let mut g = EnvGuard::set("DOMAINS", "example.com");
+        g.remove("CLOUDFLARE_API_TOKEN");
+        g.remove("CF_API_TOKEN");
+        g.remove("CLOUDFLARE_API_TOKEN_FILE");
+        g.remove("CF_API_TOKEN_FILE");
         assert!(is_env_config_mode());
-        std::env::remove_var("DOMAINS");
     }
 
     // --- parse_legacy_config edge cases ---
@@ -1427,7 +1415,7 @@ mod tests {
 
     #[test]
     fn test_substitute_non_cf_ddns_vars_ignored() {
-        std::env::set_var("HOME", "/home/user");
+        let _g = EnvGuard::set("HOME", "/home/user");
         let result = substitute_env_vars("home: $HOME");
         assert_eq!(result, "home: $HOME"); // HOME doesn't start with CF_DDNS_
     }

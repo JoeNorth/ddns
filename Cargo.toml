@@ -1,6 +1,6 @@
 [package]
 name = "cloudflare-ddns"
-version = "3.5.0"
+version = "3.6.0"
 edition = "2021"
 description = "Access your home network remotely via a custom domain name without a static IP"
 license = "GPL-3.0"
