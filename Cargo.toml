@@ -1,6 +1,6 @@
 [package]
 name = "cloudflare-ddns"
-version = "3.3.0"
+version = "3.4.0"
 edition = "2021"
 description = "Access your home network remotely via a custom domain name without a static IP"
 license = "GPL-3.0"
@@ -16,7 +16,7 @@ url = "2"
 idna = "1"
 if-addrs = "0.15"
 bollard = { version = "0.20", default-features = false, features = ["pipe"] }
-technitium = { version = "0.3", default-features = false, features = ["rustls"] }
+technitium = { version = "0.4", default-features = false, features = ["rustls"] }
 
 [profile.release]
 opt-level = "s"

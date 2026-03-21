@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "cloudflare-ddns"
-version = "3.3.0"
+version = "3.4.0"
 dependencies = [
  "bollard",
  "chrono",
@@ -1549,9 +1549,9 @@ dependencies = [
 
 [[package]]
 name = "technitium"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4258d4dd537f9f10e611203da4a564f5d844917ae8d40553fc51dafa1ab1d95d"
+checksum = "e08781d5cdf8d48b9c246b44545ed26420a19a119dff23ef52a1e6f0e888ebdc"
 dependencies = [
  "rand 0.10.0",
  "reqwest",
