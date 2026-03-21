@@ -92,22 +92,27 @@ pub fn extract_domains(
             None => continue,
         };
 
-        let domain = match labels.get(DOCKER_LABEL_KEY) {
+        let label_value = match labels.get(DOCKER_LABEL_KEY) {
             Some(d) => d.trim().to_lowercase(),
             None => continue,
         };
 
-        if domain.is_empty() {
-            let name = container_name(container);
-            ppfmt.warningf(
-                pp::EMOJI_WARNING,
-                &format!("Container {name} has empty {DOCKER_LABEL_KEY} label, skipping"),
-            );
-            continue;
-        }
+        // label_value may contain multiple domains separated by commas, split and trim them
+        for domain in label_value.split(',').map(|d| d.trim().to_string()) {
+            if domain.is_empty() {
+                let name = container_name(container);
+                ppfmt.warningf(
+                    pp::EMOJI_WARNING,
+                    &format!(
+                        "Container {name} has empty domain in {DOCKER_LABEL_KEY} label, skipping"
+                    ),
+                );
+                continue;
+            }
 
-        if seen.insert(domain.clone()) {
-            domains.push(domain);
+            if seen.insert(domain.clone()) {
+                domains.push(domain);
+            }
         }
     }
 
@@ -168,6 +173,14 @@ mod tests {
         ];
         let domains = extract_domains(&containers, &ppfmt);
         assert_eq!(domains, vec!["example.com"]);
+    }
+
+    #[test]
+    fn test_extract_domains_multiple_domains() {
+        let ppfmt = PP::default_pp();
+        let containers = vec![make_container("web1", Some("example.com,api.example.com"))];
+        let domains = extract_domains(&containers, &ppfmt);
+        assert_eq!(domains, vec!["example.com", "api.example.com"]);
     }
 
     #[test]
